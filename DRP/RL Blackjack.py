@@ -1,106 +1,145 @@
-import random
-import numpy as np
-from collections import defaultdict
+import random as rand
 
-class Environment:
-    def __init__(self):
-        pass
-
-    def reset(self):
-        pass
-
-    def step(self, action):
-        pass
 
 class Blackjack:
-    def __init__(self, num_decks=1, dealer_hits_on_soft_17=False):
-        self.n_decks = num_decks
-        self.dealer_hits_on_soft_17 = dealer_hits_on_soft_17
-        self.reset()
+  def __init__(self):
+    self.reset()
 
-    def reset(self):
-        # Reset the environment to its initial state
-        self.dealer_hand = self._deal_cards()
-        self.player_hand = self._deal_cards()
-        self.player_ace_count = self._count_aces(self.player_hand)
-        self.player_sum = self._sum_hand(self.player_hand, self.player_ace_count)
-        self.dealer_sum = self._sum_hand(self.dealer_hand, 0)
-        self.done = False
+  def reset(self):
+    self.player = []
+    self.dealer = []
+    #drawing to cards respectively 
+    self.player.append(self.drawCard())
+    self.player.append(self.drawCard())
+    self.dealer.append(self.drawCard())
+    self.dealer.append(self.drawCard())
 
-    def _deal_cards(self):
-        # Deal two cards from the deck
-        deck = [2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 11] * 4 * self.n_decks
-        random.shuffle(deck)
-        return [deck.pop(), deck.pop()]
+  def drawCard(self):
+    cardVal = rand.randint(1,13)
+    if cardVal > 10:
+      cardVal = 10
+    return cardVal 
 
-    def _sum_hand(self, hand, ace_count):
-        # Calculate the sum of the hand, treat aces AS 11 (granted the hand won't bust)
-        hand_sum = sum(hand)
-        for i in range(ace_count):
-            if hand_sum > 21:
-                hand_sum -= 10
-        return hand_sum
+  def playerScore(self):
+    score = sum(self.player)
+    # player has usuable ace, and would bust, unless they converted it to a 1 
+    if score > 21 and 11 in self.player:
+      self.player[self.player.index(11)] = 1 
+      score = sum(self.player)
+    return score
+ 
+  def dealerScore(self):
+    score = sum(self.dealer)
+    if score > 21 and 11 in self.dealer:
+      self.dealer[self.dealer.index(11)] = 1 
+      score = sum(self.dealer)
+    return score
 
-    def _count_aces(self, hand):
-        # Count the number of aces in the hand
-        return hand.count(11)
 
-    def step(self, action):
-        assert not self.done
+  def play(self, action):
+    # when choosing to stand, dealer hits until they are at least at 17
+    if action == "stand":
+      while self.dealerScore() < 17: 
+        self.dealer.append(self.drawCard())
+      dealerScore = self.dealerScore()
+      playerScore = self.playerScore()
+      # reward distributions based on outcome of game
+      if dealerScore > 21 or playerScore > dealerScore: 
+        reward = 1
+      elif dealerScore == playerScore:
+        reward = 0
+      else: 
+        reward = -1
+      term = True 
 
-        if action == 0:
-            self.done = True
-            while self.dealer_sum < 17 or (self.dealer_sum == 17 and self.dealer_hits_on_soft_17 and 11 in self.dealer_hand):
-                card = self._deal_cards()[0]
-                self.dealer_hand.append(card)
-                self.dealer_sum = self._sum_hand(self.dealer_hand, self._count_aces(self.dealer_hand))
-            if self.dealer_sum > 21 or self.player_sum > self.dealer_sum:
-                reward = 1
-            elif self.player_sum == self.dealer_sum:
-                reward = 0
-            else:
-                reward = -1
-        else:  
-            card = self._deal_cards()[0]
-            self.player_hand.append(card)
-            self.player_ace_count += self._count_aces([card])
-            self.player_sum = self._sum_hand(self.player_hand, self.player_ace_count)
-            if self.player_sum > 21:
-                self.done = True
-                reward = -1
-            else:
-                reward = 0
-
-        return (self.player_sum, self.dealer_hand[0], int(self.player_ace_count > 0)), reward, self.done
-
-def monte_carlo(env, episodes, gamma):
-    V = np.zeros(env.n_states)
-
-    # Initialize the sum of returns and count of visits
-    returns_sum = defaultdict(float)
-    returns_count = defaultdict(float)
+    # player chooses to hit  
+    else:
+      self.player.append(self.drawCard())
+      currScore = self.playerScore()
+      # if the player busts
+      if currScore > 21:
+        reward = -1 
+        term = True
+      # if the player does not bust 
+      #no reward should be given for drawing new card
+      else:
+        reward = 0 
+        term = False
     
-    for i in range(episodes):
-    # Generate an episode by playing a game of Blackjack
-    episode = []
-    state = env.reset()
-    done = False
-    while not done:
-        action = np.random.randint(2)
-        next_state, reward, done = env.step(action)
-        episode.append((state, action, reward))
-        state = next_state
+    return reward, term
 
-    # Calculate the returns for each state in the episode
-    G = 0
-    for t in reversed(range(len(episode))):
-        state, action, reward = episode[t]
-        G = gamma * G + reward
-        returns_sum[state] += G
-        returns_count[state] += 1
+class MC_Sim:
+  def __init__(self):
+    self.rewards = {}
+    self.policy = {}
+    # list of estimated of the expected rewards of a given state-action pair
+    self.Q = {}
+    # the exploration probability 
+    self.epsilon = 0.1
 
-   # Update the state-value function
-    for state in returns_sum:
-    V[state] = returns_sum[state] / returns_count[state]
+  def action(self, state):
+    # if you haven't encounter this state-action -> make a random choice
+    if state not in self.policy: 
+      self.policy[state] = rand.choice(["hit", "stand"])
+    # even if you know Q-value for this state, with probablity of Epsilon make 
+    # a random choice between hit and stand (exploration)
+    if rand.random() < self.epsilon:
+      return rand.choice(["hit", "stand"])
+    else:
+      return self.policy[state]
 
-    return V
+  def updatePolicy(self):
+    # based on esitmations (Q values) evaluate current action
+     for state in self.Q:
+      hitVal = self.Q[state]["hit"]
+      standVal = self.Q[state]["stand"]
+      if hitVal >= standVal:
+        self.policy[state] = "hit"
+      else:
+        self.policy[state] = "stand"
+
+
+  def playEpisodes(self, n):
+    for episode in range(n):
+      game = Blackjack()
+      states = []
+      actions = []
+      rewards = []
+
+      while True: 
+        state = (game.playerScore(), game.dealer[0])
+        action = self.action(state)
+        reward, term = game.play(action)
+        states.append(state)
+        actions.append(action)
+        rewards.append(reward)
+        if term:
+          break
+
+      G = 0
+      for i in range(len(states)-1, -1, -1):
+        state = states[i]
+        action = actions[i]
+        reward = rewards[i]
+        G += reward
+        if state not in self.Q:
+          self.Q[state] = {"hit": 0, "stand": 0}
+        self.Q[state][action] += (G - self.Q[state][action]) / (i+1)
+      self.updatePolicy()
+  
+  def printPolicy(self):
+    print("Player Score\tDealer Score\t Policy")
+    for playerScore in range(12,22):
+      for dealerScore in range(1,11):
+        state = (playerScore, dealerScore)
+        if state in self.policy:
+          policy = self.policy[state]
+        else: 
+          policy = "N/A"
+        print(f"{playerScore}\t\t\t\t{dealerScore}\t\t\t\t {policy}")
+          
+
+
+sim = MC_Sim()
+sim.playEpisodes(1000000)
+print(sim.printPolicy())
